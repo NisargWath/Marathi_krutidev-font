@@ -14,12 +14,18 @@ import numpy as np
 from PIL import Image
 import pytesseract
 import easyocr
+import google.generativeai as genai
+from datetime import datetime
+import json
 
 # Configure Tesseract path if needed (uncomment and modify path as per your system)
 # For Windows:
 # pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 # For Mac (if installed via Homebrew):
 # pytesseract.pytesseract.tesseract_cmd = '/usr/local/bin/tesseract'
+
+# Hardcoded API key - Replace with your actual key
+GEMINI_API_KEY = "AIzaSyC5yD31qrSfirPAyDZZd5UjPhZ4Nag93_0"  # Replace with your actual API key
 
 # Unicode to Krutidev mapping dictionary (simplified version)
 UNICODE_TO_KRUTIDEV = {
@@ -37,6 +43,53 @@ UNICODE_TO_KRUTIDEV = {
     "्": "",  # Halant - skip
     " ": " ", "\n": "\n"
 }
+
+class AIDocumentExtractor:
+    def __init__(self):
+        """Initialize Gemini Vision API"""
+        try:
+            genai.configure(api_key=GEMINI_API_KEY)
+            self.model = genai.GenerativeModel('gemini-1.5-flash')
+            self.ready = True
+        except Exception as e:
+            st.warning(f"Gemini AI not available: {str(e)}")
+            self.ready = False
+    
+    def extract_text_from_image(self, image, language="Hindi", document_type="Document"):
+        """Extract text using Gemini Vision"""
+        try:
+            # Create extraction prompt based on language
+            lang_instruction = "Hindi/Devanagari" if language == "Hindi" else "Marathi/Devanagari"
+            
+            prompt = f"""
+            Extract ALL text from this {document_type} image in {lang_instruction} script.
+
+            Please provide:
+            1. Complete text extraction maintaining original structure
+            2. Include all visible text: headers, body, numbers, dates
+            3. Preserve formatting and line breaks where logical
+            4. Extract both printed and handwritten text
+            5. Maintain original {lang_instruction} characters
+            6. If text is in Roman script, convert it appropriately
+
+            Return only the extracted text without any additional commentary:
+            """
+            
+            # Generate content using vision
+            response = self.model.generate_content([prompt, image])
+            
+            if response and hasattr(response, 'text') and response.text:
+                return response.text.strip()
+            else:
+                return "No text extracted from the image"
+                
+        except Exception as e:
+            if "429" in str(e):
+                return "Rate limit exceeded. Please wait and try again."
+            elif "quota" in str(e).lower():
+                return "API quota exceeded. Please check billing."
+            else:
+                return f"AI OCR Error: {str(e)}"
 
 def convert_unicode_to_krutidev(unicode_text):
     """
@@ -230,23 +283,29 @@ def display_conversion_results(original_text, krutidev_text, source_type="text")
 def main():
     # Page configuration
     st.set_page_config(
-        page_title="Voice & Image to Krutidev Converter",
+        page_title="Enhanced Voice & Image to Krutidev Converter",
         page_icon="🔤",
         layout="wide"
     )
     
-    st.title("🎙️📷 Voice and Image to Krutidev Font Converter")
+    st.title("🎙️📷🤖 Enhanced Voice and Image to Krutidev Font Converter")
     
     st.markdown("""
-    ### Convert voice recordings or image text to Krutidev font
+    ### Convert voice recordings or image text to Krutidev font with AI-powered OCR
     
-    This application helps you convert:
+    This enhanced application helps you convert:
     - **Voice recordings** in Hindi or Marathi to Krutidev text
     - **Audio files** to Krutidev text
-    - **Images with text** to Krutidev text
+    - **Images with text** to Krutidev text using three different OCR methods:
+      - 🤖 **Google Gemini AI Vision** (Most accurate for complex documents)
+      - 🔍 **EasyOCR** (Good for general text recognition)
+      - 📝 **Tesseract OCR** (Traditional OCR method)
     
     Choose your preferred input method from the tabs below.
     """)
+    
+    # Initialize AI extractor
+    ai_extractor = AIDocumentExtractor()
     
     # Language selection
     st.sidebar.header("⚙️ Settings")
@@ -257,6 +316,13 @@ def main():
     )
     
     language_code = "hi-IN" if language == "Hindi" else "mr-IN"
+    
+    # AI OCR settings
+    if ai_extractor.ready:
+        st.sidebar.success("🤖 Gemini AI OCR: Ready")
+    else:
+        st.sidebar.warning("🤖 Gemini AI OCR: Not available")
+        st.sidebar.caption("Update GEMINI_API_KEY in code to enable AI OCR")
     
     # Create tabs for different input methods
     tab1, tab2, tab3, tab4 = st.tabs([
@@ -347,10 +413,10 @@ def main():
                 except:
                     pass
     
-    # Tab 3: Extract from Image
+    # Tab 3: Extract from Image (Enhanced with AI OCR)
     with tab3:
-        st.header("📷 Extract Text from Image")
-        st.write("Upload an image containing text in Hindi or Marathi:")
+        st.header("📷 Enhanced Text Extraction from Images")
+        st.write("Upload an image containing text in Hindi or Marathi. Now with AI-powered OCR!")
         
         # File uploader for images
         uploaded_image = st.file_uploader(
@@ -373,15 +439,33 @@ def main():
                 st.info(f"📐 Size: {image.size[0]} x {image.size[1]} pixels")
                 
                 # OCR method selection
+                ocr_options = ["🤖 Gemini AI Vision (Recommended)", "🔍 EasyOCR", "📝 Tesseract OCR"]
+                if not ai_extractor.ready:
+                    ocr_options = ["🔍 EasyOCR (Recommended)", "📝 Tesseract OCR"]
+                
                 ocr_method = st.selectbox(
                     "Select OCR Method:",
-                    ("EasyOCR (Recommended)", "Tesseract OCR"),
-                    help="EasyOCR is generally more accurate for Indian languages"
+                    ocr_options,
+                    help="Gemini AI Vision is most accurate for complex documents and handwritten text"
                 )
+                
+                # Document type for AI OCR
+                if "Gemini AI" in ocr_method:
+                    doc_type = st.selectbox(
+                        "Document Type (for AI OCR):",
+                        ["Document", "FIR", "Police Complaint", "Legal Document", "Handwritten Note", "Form"],
+                        help="Helps AI better understand document structure"
+                    )
             
             if st.button("🔍 Extract Text from Image", type="primary"):
                 with st.spinner("🔄 Extracting text from image..."):
-                    if ocr_method == "EasyOCR (Recommended)":
+                    extracted_text = ""
+                    
+                    if "Gemini AI" in ocr_method and ai_extractor.ready:
+                        # Use Gemini AI Vision
+                        extracted_text = ai_extractor.extract_text_from_image(image, language, doc_type)
+                        
+                    elif "EasyOCR" in ocr_method:
                         # Set language codes for EasyOCR
                         if language == "Marathi":
                             ocr_languages = ['mr', 'en']  # Marathi and English
@@ -389,7 +473,8 @@ def main():
                             ocr_languages = ['hi', 'en']  # Hindi and English
                         
                         extracted_text = extract_text_easyocr(image, ocr_languages)
-                    else:
+                        
+                    else:  # Tesseract OCR
                         # Set language codes for Tesseract
                         if language == "Marathi":
                             tesseract_lang = 'mar+eng'  # Marathi and English
@@ -399,15 +484,30 @@ def main():
                         extracted_text = extract_text_tesseract(image, tesseract_lang)
                     
                     if extracted_text and not extracted_text.startswith("Error") and extracted_text.strip():
+                        # Display extraction method used
+                        method_name = ocr_method.split()[1] if "Gemini" in ocr_method else ocr_method.split()[0][2:]
+                        st.success(f"✅ Text extracted using {method_name}")
+                        
                         # Convert to Krutidev
                         krutidev_text = convert_unicode_to_krutidev(extracted_text)
                         display_conversion_results(extracted_text, krutidev_text, "image")
+                        
+                        # Show extraction stats
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("📊 Characters", len(extracted_text))
+                        with col2:
+                            st.metric("📝 Words", len(extracted_text.split()))
+                        with col3:
+                            st.metric("🔤 Method", method_name)
+                            
                     else:
                         st.error("❌ Could not extract text from the image.")
                         st.write("**💡 Tips for better results:**")
                         st.write("- Use images with clear, high-contrast text")
                         st.write("- Ensure text is not too small or blurry")
-                        st.write("- Try the other OCR method")
+                        st.write("- Try different OCR methods")
+                        st.write("- For handwritten text, use Gemini AI Vision")
                         st.write("- Consider preprocessing the image for better contrast")
     
     # Tab 4: Direct Text Input
@@ -443,6 +543,7 @@ pip install opencv-python
 pip install pillow 
 pip install pytesseract 
 pip install easyocr
+pip install google-generativeai
             """)
         
         with st.expander("Tesseract Setup"):
@@ -465,15 +566,36 @@ pip install easyocr
             ```
             """)
         
+        with st.expander("Gemini AI Setup"):
+            st.write("""
+            **Get API Key:**
+            1. Visit Google AI Studio
+            2. Create/login to Google account
+            3. Generate API key
+            4. Replace GEMINI_API_KEY in the code
+            
+            **Features:**
+            - Most accurate for complex documents
+            - Handles handwritten text well
+            - Works with multiple languages
+            - Best for legal documents, FIRs
+            """)
+        
         st.header("ℹ️ About")
         st.write("""
-        This application converts text from various sources to Krutidev font format, 
+        Enhanced application converts text from various sources to Krutidev font format, 
         commonly used for Hindi and Marathi typing in India.
         
-        **Features:**
+        **New Features:**
+        - 🤖 AI-powered OCR with Google Gemini Vision
+        - 📋 Document type detection
+        - 🎯 Improved accuracy for handwritten text
+        - 📊 Extraction statistics
+        
+        **All Features:**
         - Voice-to-text conversion
         - Audio file transcription  
-        - Image text extraction (OCR)
+        - Multi-method image text extraction
         - Direct text conversion
         - Multiple download formats
         """)
@@ -487,8 +609,14 @@ pip install easyocr
             
             **OCR not accurate:**
             - Use clearer, high-contrast images
+            - Try Gemini AI for handwritten text
             - Try EasyOCR instead of Tesseract
             - Ensure proper language selection
+            
+            **AI OCR not working:**
+            - Check API key configuration
+            - Verify internet connection
+            - Check API quota/billing
             
             **Conversion issues:**
             - Verify input text is in Unicode Devanagari
