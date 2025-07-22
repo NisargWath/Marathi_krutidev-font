@@ -25,7 +25,7 @@ import json
 # pytesseract.pytesseract.tesseract_cmd = '/usr/local/bin/tesseract'
 
 # Hardcoded API key - Replace with your actual key
-GEMINI_API_KEY = "AIzaSyC5yD31qrSfirPAyDZZd5UjPhZ4Nag93_0"  # Replace with your actual API key
+GEMINI_API_KEY = "add"  # Replace with your actual API key
 
 # Unicode to Krutidev mapping dictionary (simplified version)
 UNICODE_TO_KRUTIDEV = {
